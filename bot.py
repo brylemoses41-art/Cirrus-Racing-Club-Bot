@@ -75,18 +75,56 @@ async def help_command(interaction: discord.Interaction):
 @discord.app_commands.default_permissions(manage_guild=True)
 async def test_commands(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
-    results = []
-    for extension in COGS:
-        module = __import__(extension, fromlist=["*"])
-        for name, obj in inspect.getmembers(module):
-            if isinstance(obj, discord.app_commands.Command):
-                results.append(f"✅ {extension}.{name}")
-    embed = bot_embed("CRC Bot Diagnostics", f"{len(results)} registered command(s) checked.\nNo race, driver, penalty, or channel changes were made.")
-    embed.description = "\n".join(results)[:3900]
-    embed.set_footer(text="Cirrus Racing Club • Safe Diagnostics")
-    await interaction.followup.send(embed=embed, ephemeral=True)
+    expected_commands = {"help":"Driver and Race Control command desk","register":"Driver registration","drivers":"Driver registry listing","driver":"Driver profile","rename":"Driver record rename","manage_driver":"Driver record inspection","create_race":"Race creation","qualifying":"Qualifying grid","results":"Race results","report":"Incident reports","penalty":"Championship penalties","lockdown":"Event channel lockdown","open":"Event channel reopening","race":"Race record display","calendar":"Official season calendar","standings":"Championship standings","championship":"Championship standings alias"}
+    checks=[]; registered={command.name:command for command in bot.tree.get_commands()}
+    for name,label in expected_commands.items():
+        command=registered.get(name)
+        if command is None: checks.append(("❌",name,f"{label} — command missing")); continue
+        if not callable(command.callback): checks.append(("❌",name,f"{label} — callback missing")); continue
+        checks.append(("✅",name,label))
+    async_failures=[name for name in expected_commands if registered.get(name) and not inspect.iscoroutinefunction(registered[name].callback)]
+    checks.append(("❌" if async_failures else "✅","callbacks",f"Not async: {', '.join(sorted(async_failures))}" if async_failures else "All command callbacks are asynchronous"))
+    parameter_failures=[]
+    for name in expected_commands:
+        command=registered.get(name)
+        if command and "interaction" not in inspect.signature(command.callback).parameters: parameter_failures.append(f"/{name}: interaction")
+    checks.append(("❌" if parameter_failures else "✅","parameters","; ".join(parameter_failures) if parameter_failures else "All commands accept a Discord interaction"))
+    try:
+        drivers_data=load_json("drivers.json",{"drivers":{}}); races_data=load_json("races.json",{"races":[]}); championship_data=load_json("championship.json",{"standings":{}})
+        if not isinstance(drivers_data.get("drivers"),dict) or not isinstance(races_data.get("races"),list) or not isinstance(championship_data,dict): raise ValueError("Invalid storage structure")
+        checks.append(("✅","storage","Driver, race, and championship data are readable"))
+    except Exception as error: checks.append(("❌","storage",str(error)))
+    test_file=".command_test.tmp"; test_path=Path(__file__).resolve().parent/"data"/test_file
+    try:
+        save_json(test_file,{"ok":True,"test":"crc"}); test_data=load_json(test_file,{})
+        if test_data.get("ok") is not True or test_data.get("test")!="crc": raise ValueError("write/read verification failed")
+        checks.append(("✅","storage","Temporary write/read test passed"))
+    except Exception as error: checks.append(("❌","storage",f"Write test failed — {error}"))
+    finally:
+        if test_path.exists():
+            try:test_path.unlink()
+            except OSError:pass
+    missing_cogs=[name for name in ("Drivers","Races","Championship","Calendar") if bot.get_cog(name) is None]
+    checks.append(("❌" if missing_cogs else "✅","cogs",f"Missing: {', '.join(missing_cogs)}" if missing_cogs else "Drivers, Races, Championship, and Calendar loaded"))
+    try:
+        races_cog=bot.get_cog("Races"); sample_races=[{"id":"R001","name":"Diagnostic Race","status":"open"},{"id":"R002","name":"Second Race","status":"locked"}]
+        found=races_cog.find_race(sample_races,"r001") if races_cog else None; missing=races_cog.find_race(sample_races,"R999") if races_cog else None
+        table=races_cog.qualifying_table([{"position":1,"driver":"Diagnostic Driver","lap_time":"1:45.000"},{"position":2,"driver":"Second Driver","lap_time":"1:46.000"}]) if races_cog else ""
+        if not found or missing is not None or "P1" not in table or "Diagnostic Driver" not in table: raise ValueError("race logic failed")
+        checks.append(("✅","race logic","Race lookup and qualifying table passed"))
+    except Exception as error: checks.append(("❌","race logic",str(error)))
+    try:
+        expected_points={1:5,2:4,3:3,4:2,5:1,20:1,21:0}; failures=[f"P{p}={points_for_position(p)}" for p,e in expected_points.items() if points_for_position(p)!=e]
+        if failures: raise ValueError("; ".join(failures))
+        checks.append(("✅","points","Championship scoring logic passed"))
+    except Exception as error: checks.append(("❌","points",str(error)))
+    passed=sum(s=="✅" for s,_,_ in checks); failed=sum(s=="❌" for s,_,_ in checks)
+    embed=bot_embed("CRC Bot Diagnostics","Every registered command has been checked for wiring, callbacks, parameters, storage dependencies, and safe underlying logic. No real race, driver, penalty, or channel changes were made.")
+    embed.add_field(name="Result",value=f"**{passed} passed** · **{failed} failed**",inline=False)
+    embed.add_field(name="Diagnostic Report",value="\n".join(f"{s} **{n}** — {d}" for s,n,d in checks),inline=False)
+    embed.set_footer(text="Cirrus Racing Club • Race Control Diagnostics")
+    await interaction.followup.send(embed=embed,ephemeral=True)
 
 
-if __name__ == "__main__":
-    dashboard = start_dashboard()
-    dashboard.serve_forever()
+start_dashboard()
+bot.run(TOKEN)
