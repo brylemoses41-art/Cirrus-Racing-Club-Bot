@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from config import get_token
 from constants import points_for_position
 from dashboard_v2 import start_dashboard
+import dashboard_session_fix
 from dashboard import set_bot
 from storage import load_json, save_json
 from utils import bot_embed
@@ -15,6 +16,8 @@ from utils import bot_embed
 
 load_dotenv()
 TOKEN = get_token()
+
+dashboard_session_fix.install()
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
