@@ -1,19 +1,23 @@
 POINTS_BY_POSITION = {
-    1: 5,
-    2: 4,
-    3: 3,
-    4: 2,
+    1: 15,
+    2: 12,
+    3: 10,
+    4: 8,
+    5: 6,
+    6: 5,
+    7: 4,
+    8: 3,
+    9: 2,
+    10: 1,
 }
 
-MAX_POINTS_POSITION = 20
+MAX_POINTS_POSITION = 10
+QUALIFYING_BONUS = 5
+CLEAN_RACE_BONUS = 5
 EVENT_CATEGORY_NAME = "CRC Events"
 RACE_CONTROL_ROLE = "Race Control"
 REMINDER_WINDOWS = (24 * 60 * 60, 60 * 60)
 
 
 def points_for_position(position: int) -> int:
-    if position in POINTS_BY_POSITION:
-        return POINTS_BY_POSITION[position]
-    if 5 <= position <= MAX_POINTS_POSITION:
-        return 1
-    return 0
+    return POINTS_BY_POSITION.get(position, 0)
