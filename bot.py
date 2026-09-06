@@ -118,10 +118,35 @@ async def test_commands(interaction: discord.Interaction):
         if failures: raise ValueError("; ".join(failures))
         checks.append(("✅","points","Championship scoring logic passed"))
     except Exception as error: checks.append(("❌","points",str(error)))
+
     passed=sum(s=="✅" for s,_,_ in checks); failed=sum(s=="❌" for s,_,_ in checks)
     embed=bot_embed("CRC Bot Diagnostics","Every registered command has been checked for wiring, callbacks, parameters, storage dependencies, and safe underlying logic. No real race, driver, penalty, or channel changes were made.")
     embed.add_field(name="Result",value=f"**{passed} passed** · **{failed} failed**",inline=False)
-    embed.add_field(name="Diagnostic Report",value="\n".join(f"{s} **{n}** — {d}" for s,n,d in checks),inline=False)
+
+    # Discord limits each embed field value to 1024 characters. Split the
+    # diagnostic report safely so a larger test suite can never invalidate it.
+    report_lines = [f"{s} **{n}** — {d}" for s, n, d in checks]
+    report_chunks = []
+    current = ""
+    for line in report_lines:
+        # Leave a small safety margin below Discord's hard 1024-character limit.
+        if len(current) + len(line) + (1 if current else 0) > 1000:
+            if current:
+                report_chunks.append(current)
+            # A single unexpectedly long diagnostic is split as well.
+            while len(line) > 1000:
+                report_chunks.append(line[:1000])
+                line = line[1000:]
+            current = line
+        else:
+            current = f"{current}\n{line}" if current else line
+    if current:
+        report_chunks.append(current)
+
+    for index, chunk in enumerate(report_chunks):
+        field_name = "Diagnostic Report" if index == 0 else f"Diagnostic Report · {index + 1}"
+        embed.add_field(name=field_name, value=chunk, inline=False)
+
     embed.set_footer(text="Cirrus Racing Club • Race Control Diagnostics")
     await interaction.followup.send(embed=embed,ephemeral=True)
 
