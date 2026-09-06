@@ -3,18 +3,24 @@ from __future__ import annotations
 from constants import points_for_position
 from storage import load_json, save_json
 
+# CRC driver progression uses a larger XP scale so ranks feel like real progression.
+# Championship points remain separate from XP.
 RANKS = (
     (0, "Rookie", "🟢"),
-    (50, "Novice", "🔵"),
-    (150, "Semi-Pro", "🟣"),
-    (300, "Master", "🟠"),
-    (500, "Elite", "🔴"),
+    (5_000, "Novice", "🔵"),
+    (15_000, "Semi-Pro", "🟣"),
+    (30_000, "Master", "🟠"),
+    (50_000, "Elite", "🔴"),
 )
 
 RANK_ROLE_NAMES = tuple(rank[1] for rank in RANKS)
-PARTICIPATION_XP = 5
-QUALIFYING_BONUS_XP = 5
-CLEAN_RACE_BONUS_XP = 5
+
+# XP is intentionally scaled up from championship points.
+# A driver's race points are multiplied by 100 for progression XP.
+XP_POINT_MULTIPLIER = 100
+PARTICIPATION_XP = 500
+QUALIFYING_BONUS_XP = 500
+CLEAN_RACE_BONUS_XP = 500
 
 
 def rank_for_xp(xp: int) -> tuple[str, str, int | None]:
@@ -57,8 +63,14 @@ def fastest_qualifying_driver(race: dict) -> str | None:
 
 def is_clean_race(race: dict, driver_name: str) -> bool:
     target = driver_name.strip().lower()
-    reported = any(str(item.get("driver", "")).strip().lower() == target for item in race.get("reports", []))
-    penalized = any(str(item.get("driver", "")).strip().lower() == target for item in race.get("penalties", []))
+    reported = any(
+        str(item.get("driver", "")).strip().lower() == target
+        for item in race.get("reports", [])
+    )
+    penalized = any(
+        str(item.get("driver", "")).strip().lower() == target
+        for item in race.get("penalties", [])
+    )
     return not reported and not penalized
 
 
@@ -68,9 +80,9 @@ def official_result_points(race: dict, result: dict) -> int:
     points = points_for_position(position)
     fastest = fastest_qualifying_driver(race)
     if driver and fastest and fastest.strip().lower() == driver.lower():
-        points += QUALIFYING_BONUS_XP
+        points += 5
     if driver and is_clean_race(race, driver):
-        points += CLEAN_RACE_BONUS_XP
+        points += 5
     return points
 
 
@@ -80,7 +92,8 @@ def calculate_driver_xp(driver_name: str, races: list[dict]) -> int:
     for race in races:
         for result in race.get("results", []):
             if str(result.get("driver", "")).strip().lower() == target:
-                xp += official_result_points(race, result)
+                # Race/bonus points are converted to progression XP at 100x.
+                xp += official_result_points(race, result) * XP_POINT_MULTIPLIER
                 xp += PARTICIPATION_XP
     return xp
 
