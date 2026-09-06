@@ -21,6 +21,7 @@ COGS = (
     "cogs.drivers",
     "cogs.races",
     "cogs.championship",
+    "cogs.calendar",
 )
 
 
@@ -71,7 +72,7 @@ async def help_command(interaction: discord.Interaction):
     )
     embed.add_field(
         name="Race Administration",
-        value="`/create_race`  `/race`  `/qualifying`  `/results`",
+        value="`/create_race`  `/race`  `/qualifying`  `/results`  `/calendar`",
         inline=False,
     )
     embed.add_field(
@@ -113,6 +114,7 @@ async def test_commands(interaction: discord.Interaction):
         "lockdown": "Event channel lockdown",
         "open": "Event channel reopening",
         "race": "Race record display",
+        "calendar": "Official season calendar",
         "standings": "Championship standings",
         "championship": "Championship standings alias",
     }
@@ -193,12 +195,12 @@ async def test_commands(interaction: discord.Interaction):
                 pass
 
     # 6. Verify all cogs are loaded.
-    cog_names = ("Drivers", "Races", "Championship")
+    cog_names = ("Drivers", "Races", "Championship", "Calendar")
     missing_cogs = [name for name in cog_names if bot.get_cog(name) is None]
     if missing_cogs:
         checks.append(("❌", "cogs", f"Missing: {', '.join(missing_cogs)}"))
     else:
-        checks.append(("✅", "cogs", "Drivers, Races, and Championship loaded"))
+        checks.append(("✅", "cogs", "Drivers, Races, Championship, and Calendar loaded"))
 
     # 7. Exercise pure race logic without creating channels or changing real race records.
     try:
