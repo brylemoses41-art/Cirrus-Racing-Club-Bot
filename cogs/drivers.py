@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from rank_system import rank_for_xp
 from storage import load_json, save_json
 from utils import bot_embed, set_crc_footer
 
@@ -27,10 +28,16 @@ class Drivers(commands.Cog):
             "name": name,
             "discord_id": interaction.user.id,
             "registered_at": discord.utils.utcnow().isoformat(),
+            "xp": 0,
+            "rating": 0,
+            "rank": "Rookie",
+            "rank_badge": "🟢",
+            "next_rank_xp": 50,
         }
         save_json("drivers.json", data)
         embed = bot_embed("Driver Registry", "Your registration has been entered into the official record.")
         embed.add_field(name="Driver", value=f"**{name}**", inline=False)
+        embed.add_field(name="Rank", value="**Rookie** · 0 XP", inline=True)
         set_crc_footer(embed, "Official Driver Registry")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -40,9 +47,14 @@ class Drivers(commands.Cog):
         if not entries:
             await interaction.response.send_message("The Driver Registry is presently empty.", ephemeral=True)
             return
-        entries.sort(key=lambda item: item.get("name", "").lower())
+        entries.sort(key=lambda item: (-int(item.get("xp", item.get("rating", 0)) or 0), item.get("name", "").lower()))
+        lines = []
+        for i, entry in enumerate(entries, 1):
+            xp = int(entry.get("xp", entry.get("rating", 0)) or 0)
+            rank, badge, _ = rank_for_xp(xp)
+            lines.append(f"`{i:02d}`  {badge} **{entry.get('name', 'Unnamed')}** — {rank} · {xp} XP")
         embed = bot_embed("Driver Registry", "Registered drivers of Cirrus Racing Club.")
-        embed.description = "\n".join(f"`{i:02d}`  **{entry.get('name', 'Unnamed')}**" for i, entry in enumerate(entries, 1))
+        embed.description = "\n".join(lines)
         set_crc_footer(embed, f"{len(entries)} registered driver(s)")
         await interaction.response.send_message(embed=embed)
 
@@ -65,8 +77,15 @@ class Drivers(commands.Cog):
         podiums = sum(1 for r in results if int(r.get("position", 999)) <= 3)
         points = sum(int(r.get("points", 0)) for r in results)
         points -= sum(int(p.get("points", 0)) for race in races for p in race.get("penalties", []) if p.get("driver", "").lower() == name.lower())
+        xp = int(entry.get("xp", entry.get("rating", 0)) or 0)
+        rank, badge, next_xp = rank_for_xp(xp)
+        progress = f"{xp} XP"
+        if next_xp is not None:
+            progress += f" · {next_xp - xp} XP to {rank_for_xp(next_xp)[0]}"
 
-        embed = bot_embed("Driver Record", f"**{name}**\nOfficial competition statistics")
+        embed = bot_embed("Driver Record", f"**{name}**\nOfficial CRC competition profile")
+        embed.add_field(name="RANK", value=f"{badge} **{rank}**", inline=True)
+        embed.add_field(name="XP", value=f"**{progress}**", inline=True)
         embed.add_field(name="STARTS", value=f"`{starts}`", inline=True)
         embed.add_field(name="WINS", value=f"`{wins}`", inline=True)
         embed.add_field(name="PODIUMS", value=f"`{podiums}`", inline=True)
@@ -96,8 +115,12 @@ class Drivers(commands.Cog):
         if not entry:
             await interaction.response.send_message("That driver is not on the registry.", ephemeral=True)
             return
+        xp = int(entry.get("xp", entry.get("rating", 0)) or 0)
+        rank, badge, next_xp = rank_for_xp(xp)
         embed = bot_embed("Driver Record", "Internal Race Control reference.")
         embed.add_field(name="Driver", value=f"**{entry.get('name')}**", inline=False)
+        embed.add_field(name="Rank", value=f"{badge} **{rank}** · {xp} XP", inline=False)
+        embed.add_field(name="Next Rank", value=f"{next_xp} XP" if next_xp is not None else "Maximum rank", inline=False)
         embed.add_field(name="Discord ID", value=f"`{entry.get('discord_id')}`", inline=False)
         embed.add_field(name="Registered", value=entry.get("registered_at", "—"), inline=False)
         set_crc_footer(embed, "Race Control")
