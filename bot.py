@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 from config import get_token
 from constants import points_for_position
-from dashboard import start_dashboard
+from dashboard import set_bot, start_dashboard
 from storage import load_json, save_json
 from utils import bot_embed
 
@@ -44,6 +44,7 @@ async def setup_hook():
 
 @bot.event
 async def on_ready():
+    set_bot(bot)
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
 
 
