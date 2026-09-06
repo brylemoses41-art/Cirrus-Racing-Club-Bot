@@ -23,6 +23,22 @@ class Races(commands.Cog):
         return next((race for race in races if str(race.get("id", "")).strip().upper() == target), None)
 
     @staticmethod
+    def next_race_id(races):
+        year = datetime.now(timezone.utc).year % 100
+        prefix = f"CRC-{year:02d}-"
+        sequence = 0
+
+        for race in races:
+            race_id = str(race.get("id", "")).strip().upper()
+            if race_id.startswith(prefix):
+                try:
+                    sequence = max(sequence, int(race_id[len(prefix):]))
+                except ValueError:
+                    continue
+
+        return f"{prefix}{sequence + 1:03d}"
+
+    @staticmethod
     def parse_date(value):
         try:
             parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
@@ -106,7 +122,7 @@ class Races(commands.Cog):
 
         data = load_json("races.json", {"races": []})
         races = data.setdefault("races", [])
-        race_id = f"R{len(races) + 1:03d}"
+        race_id = self.next_race_id(races)
         race = {
             "id": race_id, "name": name.strip(), "track": track.strip(), "laps": laps,
             "date": date.strip(), "status": "open", "created_by": interaction.user.id,
@@ -121,7 +137,7 @@ class Races(commands.Cog):
             try:
                 channel = await self.get_event_channel(interaction.guild, race, data)
                 await channel.send(
-                    f"# {race['name']}\n**Circuit:** {race['track']}\n**Distance:** {laps} lap(s)\n"
+                    f"# {race['name']}\n**Event Record:** `{race_id}`\n**Circuit:** {race['track']}\n**Distance:** {laps} lap(s)\n"
                     f"**Date:** {race['date']}\n\nRace Control has opened the event record."
                 )
                 channel_text = channel.mention
