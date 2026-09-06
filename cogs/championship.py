@@ -2,7 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from constants import points_for_position
+from rank_system import official_result_points
 from storage import load_json
 from utils import bot_embed, set_crc_footer
 
@@ -20,9 +20,8 @@ class Championship(commands.Cog):
                 driver = result.get("driver", "").strip()
                 if not driver:
                     continue
-                position = int(result.get("position", 0))
                 totals.setdefault(driver, 0)
-                totals[driver] += points_for_position(position)
+                totals[driver] += official_result_points(race, result)
 
             for penalty in race.get("penalties", []):
                 driver = penalty.get("driver", "").strip()
@@ -45,7 +44,7 @@ class Championship(commands.Cog):
 
         embed = bot_embed(
             "Championship Standings",
-            "The current order of the championship, as entered in the official race records.",
+            "The current Mazda Cup championship order, including qualifying and clean-race bonuses.",
         )
         embed.add_field(name="CURRENT ORDER", value="\n".join(lines), inline=False)
         set_crc_footer(embed, "Official Championship")
