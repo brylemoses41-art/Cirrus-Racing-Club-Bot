@@ -10,14 +10,12 @@ load_dotenv()
 TOKEN = get_token()
 
 intents = discord.Intents.default()
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 COGS = (
     "cogs.drivers",
     "cogs.races",
-    "cogs.standings",
-    "cogs.control",
+    "cogs.championship",
 )
 
 
@@ -79,6 +77,11 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="Race Control",
         value="`/report`  `/penalty`  `/lockdown`  `/open`",
+        inline=False,
+    )
+    embed.add_field(
+        name="Automation",
+        value="Automatic event channels, result posts, and race reminders.",
         inline=False,
     )
     embed.set_footer(text="Cirrus Racing Club • Official Command Desk")
