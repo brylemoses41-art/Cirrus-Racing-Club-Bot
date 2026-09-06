@@ -52,9 +52,12 @@ class Races(commands.Cog):
     @app_commands.describe(name="Race name", track="Track", laps="Number of laps", date="ISO date/time, e.g. 2026-09-10 20:00")
     @app_commands.default_permissions(manage_guild=True)
     async def create_race(self, interaction: discord.Interaction, name: str, track: str, laps: int, date: str):
+        await interaction.response.defer()
+
         if laps < 1:
-            await interaction.response.send_message("A race must contain at least one lap.", ephemeral=True)
+            await interaction.followup.send("A race must contain at least one lap.", ephemeral=True)
             return
+
         data = load_json("races.json", {"races": []})
         races = data.setdefault("races", [])
         race_id = f"R{len(races) + 1:03d}"
@@ -86,7 +89,7 @@ class Races(commands.Cog):
         embed.add_field(name="Date", value=race["date"], inline=True)
         embed.add_field(name="Event Channel", value=channel_text, inline=False)
         embed.set_footer(text="Cirrus Racing Club • Race Control")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="qualifying", description="Record a driver's qualifying result.")
     @app_commands.describe(race_id="Race record ID", driver="Driver name", lap_time="Qualifying lap time", position="Grid position")
