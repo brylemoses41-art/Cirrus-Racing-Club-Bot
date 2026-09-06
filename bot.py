@@ -3,6 +3,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from config import get_token
+from storage import load_json, save_json
 from utils import bot_embed
 
 
@@ -86,6 +87,93 @@ async def help_command(interaction: discord.Interaction):
     )
     embed.set_footer(text="Cirrus Racing Club • Official Command Desk")
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="test_commands", description="Run a safe smoke test of the bot's commands and systems.")
+@discord.app_commands.default_permissions(manage_guild=True)
+async def test_commands(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    expected_commands = {
+        "help",
+        "register",
+        "drivers",
+        "driver",
+        "rename",
+        "manage_driver",
+        "create_race",
+        "qualifying",
+        "results",
+        "report",
+        "penalty",
+        "lockdown",
+        "open",
+        "race",
+        "standings",
+        "championship",
+    }
+
+    registered = {command.name for command in bot.tree.get_commands()}
+    missing = sorted(expected_commands - registered)
+    extra = sorted(registered - expected_commands - {"test_commands"})
+
+    checks = []
+
+    if missing:
+        checks.append(f"❌ Missing commands: {', '.join(missing)}")
+    else:
+        checks.append(f"✅ Commands loaded: {len(expected_commands)}/16")
+
+    try:
+        drivers_data = load_json("drivers.json", {"drivers": {}})
+        races_data = load_json("races.json", {"races": []})
+        if not isinstance(drivers_data.get("drivers"), dict):
+            raise ValueError("drivers.json has an invalid structure")
+        if not isinstance(races_data.get("races"), list):
+            raise ValueError("races.json has an invalid structure")
+        checks.append("✅ Data storage: readable")
+    except Exception as error:
+        checks.append(f"❌ Data storage: {error}")
+
+    try:
+        test_file = ".command_test.tmp"
+        save_json(test_file, {"ok": True})
+        test_data = load_json(test_file, {})
+        from pathlib import Path
+        test_path = Path(__file__).resolve().parent / "data" / test_file
+        if test_path.exists():
+            test_path.unlink()
+        if test_data.get("ok") is not True:
+            raise ValueError("write/read verification failed")
+        checks.append("✅ Data storage: write test passed")
+    except Exception as error:
+        checks.append(f"❌ Data storage: write test failed — {error}")
+
+    try:
+        races_cog = bot.get_cog("Races")
+        drivers_cog = bot.get_cog("Drivers")
+        championship_cog = bot.get_cog("Championship")
+        if not all((races_cog, drivers_cog, championship_cog)):
+            raise ValueError("one or more cogs are not loaded")
+        checks.append("✅ Cogs: drivers, races, championship loaded")
+    except Exception as error:
+        checks.append(f"❌ Cogs: {error}")
+
+    if extra:
+        checks.append(f"ℹ️ Additional commands detected: {', '.join(extra)}")
+
+    embed = bot_embed(
+        "Command Test",
+        "A safe smoke test has been completed. Commands that change races, penalties, channels, or driver records are not executed automatically.",
+    )
+    embed.add_field(name="System Check", value="\n".join(checks), inline=False)
+    embed.add_field(
+        name="Registered Commands",
+        value="\n".join(f"• `/{name}`" for name in sorted(registered)),
+        inline=False,
+    )
+    embed.set_footer(text="Cirrus Racing Club • Race Control Diagnostics")
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 bot.run(TOKEN)
