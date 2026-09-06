@@ -1,25 +1,14 @@
-import os
-
 import discord
-from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 
+from config import get_token
+from utils import bot_embed
 
-# =========================================================
-# ENVIRONMENT
-# =========================================================
+
 load_dotenv()
+TOKEN = get_token()
 
-TOKEN = os.getenv("DISCORD_TOKEN")
-
-if not TOKEN:
-    raise RuntimeError("DISCORD_TOKEN is not set in the environment.")
-
-
-# =========================================================
-# BOT SETUP
-# =========================================================
 intents = discord.Intents.default()
 
 bot = commands.Bot(
@@ -28,9 +17,6 @@ bot = commands.Bot(
 )
 
 
-# =========================================================
-# STARTUP
-# =========================================================
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
@@ -42,15 +28,26 @@ async def on_ready():
         print(f"Failed to sync slash commands: {error}")
 
 
-# =========================================================
-# BASIC HELP COMMAND
-# =========================================================
+@bot.tree.error
+async def on_app_command_error(
+    interaction: discord.Interaction,
+    error: discord.app_commands.AppCommandError,
+):
+    print(f"Slash command error: {error}")
+
+    message = "❌ Something went wrong while running that command."
+
+    if interaction.response.is_done():
+        await interaction.followup.send(message, ephemeral=True)
+    else:
+        await interaction.response.send_message(message, ephemeral=True)
+
+
 @bot.tree.command(name="help", description="Show Cirrus Racing Club bot commands.")
 async def help_command(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🏁 Cirrus Racing Club",
-        description="Bot commands will be listed here as we build them.",
-        color=discord.Color.blue(),
+    embed = bot_embed(
+        "🏁 Cirrus Racing Club",
+        "Bot commands will be listed here as we build them.",
     )
 
     embed.add_field(
@@ -62,7 +59,4 @@ async def help_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-# =========================================================
-# RUN
-# =========================================================
 bot.run(TOKEN)
