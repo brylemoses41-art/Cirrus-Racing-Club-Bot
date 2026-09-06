@@ -1,14 +1,16 @@
+import asyncio
 import inspect
 from pathlib import Path
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 from config import get_token
 from constants import points_for_position
 from dashboard_app import start_dashboard
 from dashboard import set_bot
+from rank_system import RANKS, reconcile_driver_records
 from storage import load_json, save_json
 from utils import bot_embed
 
@@ -19,12 +21,74 @@ TOKEN = get_token()
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# dashboard_v2 still calls this value "rating" internally for backwards
+# compatibility. It now represents CRC rank XP and uses the real five ranks.
+import dashboard_v2
+
+dashboard_v2.RANKS = tuple((threshold, name.upper(), badge) for threshold, name, badge in RANKS)
+
 COGS = (
     "cogs.drivers",
     "cogs.races",
     "cogs.championship",
     "cogs.calendar",
 )
+
+
+async def sync_rank_roles(changes: dict[str, dict] | None = None):
+    """Apply the driver's current CRC rank as a Discord role in every guild."""
+    drivers = load_json("drivers.json", {"drivers": {}}).get("drivers", {})
+    wanted = {str(entry.get("discord_id")): entry for entry in drivers.values() if entry.get("discord_id")}
+    changed_ids = set(changes or wanted)
+
+    for discord_id, entry in wanted.items():
+        change = changes.get(discord_id) if changes else None
+        if changes and discord_id not in changed_ids:
+            continue
+        if changes and change and change.get("old_rank") == change.get("rank"):
+            # XP changed but the rank did not. No Discord role work is needed.
+            continue
+
+        rank_name = str(entry.get("rank", "Rookie"))
+        for guild in bot.guilds:
+            try:
+                member = guild.get_member(int(discord_id))
+                if member is None:
+                    member = await guild.fetch_member(int(discord_id))
+
+                rank_roles = [role for role in guild.roles if role.name in RANKS_NAMES]
+                role = discord.utils.get(guild.roles, name=rank_name)
+                if role is None:
+                    role = await guild.create_role(name=rank_name, reason="CRC automatic driver rank")
+
+                remove_roles = [r for r in rank_roles if r != role and r in member.roles]
+                if remove_roles:
+                    await member.remove_roles(*remove_roles, reason="CRC rank progression")
+                if role not in member.roles:
+                    await member.add_roles(role, reason="CRC rank progression")
+            except (discord.Forbidden, discord.HTTPException, ValueError) as error:
+                print(f"Rank role sync failed for {entry.get('name')} in {guild.name}: {error}")
+
+
+RANKS_NAMES = {rank[1] for rank in RANKS}
+
+
+async def reconcile_and_sync():
+    changes = await asyncio.to_thread(reconcile_driver_records)
+    await sync_rank_roles(changes)
+
+
+@tasks.loop(seconds=30)
+async def crc_rank_loop():
+    try:
+        await reconcile_and_sync()
+    except Exception as error:
+        print(f"CRC rank sync failed: {error}")
+
+
+@crc_rank_loop.before_loop
+async def before_crc_rank_loop():
+    await bot.wait_until_ready()
 
 
 @bot.event
@@ -47,6 +111,12 @@ async def setup_hook():
 async def on_ready():
     set_bot(bot)
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    try:
+        await reconcile_and_sync()
+    except Exception as error:
+        print(f"Initial CRC rank sync failed: {error}")
+    if not crc_rank_loop.is_running():
+        crc_rank_loop.start()
 
 
 @bot.tree.error
@@ -66,7 +136,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="Race Administration", value="`/create_race`  `/race`  `/qualifying`  `/results`  `/calendar`", inline=False)
     embed.add_field(name="Championship", value="`/standings`  `/championship`", inline=False)
     embed.add_field(name="Race Control", value="`/report`  `/penalty`  `/lockdown`  `/open`", inline=False)
-    embed.add_field(name="Automation", value="Automatic event channels, result posts, and race reminders.", inline=False)
+    embed.add_field(name="Automation", value="Automatic event channels, result posts, race reminders, rank XP, and Discord rank roles.", inline=False)
     embed.set_footer(text="Cirrus Racing Club • Official Command Desk")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -107,33 +177,34 @@ async def test_commands(interaction: discord.Interaction):
     missing_cogs=[name for name in ("Drivers","Races","Championship","Calendar") if bot.get_cog(name) is None]
     checks.append(("❌" if missing_cogs else "✅","cogs",f"Missing: {', '.join(missing_cogs)}" if missing_cogs else "Drivers, Races, Championship, and Calendar loaded"))
     try:
-        races_cog=bot.get_cog("Races"); sample_races=[{"id":"R001","name":"Diagnostic Race","status":"open"},{"id":"R002","name":"Second Race","status":"locked"}]
-        found=races_cog.find_race(sample_races,"r001") if races_cog else None; missing=races_cog.find_race(sample_races,"R999") if races_cog else None
+        races_cog=bot.get_cog("Races"); sample_races=[{"id":"CRC-26-001","name":"Diagnostic Race","status":"open"},{"id":"CRC-26-002","name":"Second Race","status":"locked"}]
+        found=races_cog.find_race(sample_races,"crc-26-001") if races_cog else None; missing=races_cog.find_race(sample_races,"CRC-26-999") if races_cog else None
         table=races_cog.qualifying_table([{"position":1,"driver":"Diagnostic Driver","lap_time":"1:45.000"},{"position":2,"driver":"Second Driver","lap_time":"1:46.000"}]) if races_cog else ""
         if not found or missing is not None or "P1" not in table or "Diagnostic Driver" not in table: raise ValueError("race logic failed")
         checks.append(("✅","race logic","Race lookup and qualifying table passed"))
     except Exception as error: checks.append(("❌","race logic",str(error)))
     try:
-        expected_points={1:5,2:4,3:3,4:2,5:1,20:1,21:0}; failures=[f"P{p}={points_for_position(p)}" for p,e in expected_points.items() if points_for_position(p)!=e]
+        expected_points={1:15,2:12,3:10,4:8,5:6,6:5,7:4,8:3,9:2,10:1,11:0,20:0}; failures=[f"P{p}={points_for_position(p)}" for p,e in expected_points.items() if points_for_position(p)!=e]
         if failures: raise ValueError("; ".join(failures))
-        checks.append(("✅","points","Championship scoring logic passed"))
+        checks.append(("✅","points","Mazda Cup scoring logic passed (15 max + bonuses)"))
     except Exception as error: checks.append(("❌","points",str(error)))
+    try:
+        rank_names=[rank[1] for rank in RANKS]
+        if rank_names != ["Rookie", "Novice", "Semi-Pro", "Master", "Elite"]: raise ValueError("rank progression configuration is invalid")
+        checks.append(("✅","ranks","Rookie → Novice → Semi-Pro → Master → Elite"))
+    except Exception as error: checks.append(("❌","ranks",str(error)))
 
     passed=sum(s=="✅" for s,_,_ in checks); failed=sum(s=="❌" for s,_,_ in checks)
     embed=bot_embed("CRC Bot Diagnostics","Every registered command has been checked for wiring, callbacks, parameters, storage dependencies, and safe underlying logic. No real race, driver, penalty, or channel changes were made.")
     embed.add_field(name="Result",value=f"**{passed} passed** · **{failed} failed**",inline=False)
 
-    # Discord limits each embed field value to 1024 characters. Split the
-    # diagnostic report safely so a larger test suite can never invalidate it.
     report_lines = [f"{s} **{n}** — {d}" for s, n, d in checks]
     report_chunks = []
     current = ""
     for line in report_lines:
-        # Leave a small safety margin below Discord's hard 1024-character limit.
         if len(current) + len(line) + (1 if current else 0) > 1000:
             if current:
                 report_chunks.append(current)
-            # A single unexpectedly long diagnostic is split as well.
             while len(line) > 1000:
                 report_chunks.append(line[:1000])
                 line = line[1000:]
