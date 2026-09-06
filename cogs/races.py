@@ -1,11 +1,10 @@
-import asyncio
 from datetime import datetime, timezone
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from constants import EVENT_CATEGORY_NAME, RACE_CONTROL_ROLE, REMINDER_WINDOWS, points_for_position
+from constants import EVENT_CATEGORY_NAME, REMINDER_WINDOWS, points_for_position
 from storage import load_json, save_json
 from utils import bot_embed
 
@@ -25,18 +24,14 @@ class Races(commands.Cog):
     @staticmethod
     def parse_date(value):
         try:
-            text = value.strip().replace("Z", "+00:00")
-            parsed = datetime.fromisoformat(text)
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return parsed
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
         except ValueError:
             return None
 
-    async def get_event_channel(self, guild, race):
-        channel_id = race.get("channel_id")
-        if channel_id:
-            channel = guild.get_channel(channel_id)
+    async def get_event_channel(self, guild, race, data):
+        if race.get("channel_id"):
+            channel = guild.get_channel(race["channel_id"])
             if channel:
                 return channel
 
@@ -50,7 +45,7 @@ class Races(commands.Cog):
             reason="Cirrus Racing Club race event",
         )
         race["channel_id"] = channel.id
-        save_json("races.json", load_json("races.json", {"races": []}))
+        save_json("races.json", data)
         return channel
 
     @app_commands.command(name="create_race", description="Create an official race record and event channel.")
@@ -72,21 +67,24 @@ class Races(commands.Cog):
         races.append(race)
         save_json("races.json", data)
 
-        channel_text = ""
+        channel_text = "Channel not created."
         if interaction.guild:
             try:
-                channel = await self.get_event_channel(interaction.guild, race)
-                await channel.send(f"# {race['name']}\n**Circuit:** {race['track']}\n**Distance:** {laps} lap(s)\n**Date:** {race['date']}\n\nRace Control has opened the event record.")
-                channel_text = f"\nEvent channel: {channel.mention}"
+                channel = await self.get_event_channel(interaction.guild, race, data)
+                await channel.send(
+                    f"# {race['name']}\n**Circuit:** {race['track']}\n**Distance:** {laps} lap(s)\n"
+                    f"**Date:** {race['date']}\n\nRace Control has opened the event record."
+                )
+                channel_text = channel.mention
             except discord.Forbidden:
-                channel_text = "\nEvent channel could not be created; check the bot's Manage Channels permission."
+                channel_text = "Channel creation failed — check the bot's Manage Channels permission."
 
         embed = bot_embed("Race Control", "A new event has been entered into the official calendar.")
         embed.add_field(name="Race", value=f"**{race['name']}** (`{race_id}`)", inline=False)
         embed.add_field(name="Circuit", value=race["track"], inline=True)
         embed.add_field(name="Distance", value=f"{laps} lap(s)", inline=True)
         embed.add_field(name="Date", value=race["date"], inline=True)
-        embed.add_field(name="Event", value=channel_text.strip() or "Channel not created.", inline=False)
+        embed.add_field(name="Event Channel", value=channel_text, inline=False)
         embed.set_footer(text="Cirrus Racing Club • Race Control")
         await interaction.response.send_message(embed=embed)
 
@@ -103,7 +101,7 @@ class Races(commands.Cog):
             await interaction.response.send_message("Grid position must be 1 or greater.", ephemeral=True)
             return
         race.setdefault("qualifying", []).append({"driver": driver.strip(), "lap_time": lap_time.strip(), "position": position})
-        race["qualifying"].sort(key=lambda x: x.get("position", 999))
+        race["qualifying"].sort(key=lambda item: item.get("position", 999))
         save_json("races.json", data)
         await interaction.response.send_message(f"Qualifying has been recorded: **P{position} — {driver} — {lap_time}**.", ephemeral=True)
 
@@ -122,9 +120,10 @@ class Races(commands.Cog):
         if position < 1:
             await interaction.response.send_message("Finishing position must be 1 or greater.", ephemeral=True)
             return
+
         points = points_for_position(position)
         race.setdefault("results", []).append({"driver": driver.strip(), "position": position, "points": points})
-        race["results"].sort(key=lambda x: x.get("position", 999))
+        race["results"].sort(key=lambda item: item.get("position", 999))
         save_json("races.json", data)
 
         if interaction.guild and race.get("channel_id"):
@@ -132,7 +131,10 @@ class Races(commands.Cog):
             if channel:
                 await channel.send(f"**Official Result**\nP{position} — **{driver.strip()}** — {points} pts")
 
-        await interaction.response.send_message(f"The result has been entered into the official record: **P{position} — {driver}** ({points} pts).", ephemeral=True)
+        await interaction.response.send_message(
+            f"The result has been entered into the official record: **P{position} — {driver}** ({points} pts).",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="report", description="Submit an incident report to Race Control.")
     @app_commands.describe(race_id="Race record ID", driver="Driver involved", details="What happened")
@@ -142,8 +144,10 @@ class Races(commands.Cog):
         if not race:
             await interaction.response.send_message("That race record could not be found.", ephemeral=True)
             return
-        report = {"driver": driver.strip(), "details": details.strip(), "reported_by": interaction.user.id, "created_at": discord.utils.utcnow().isoformat()}
-        race.setdefault("reports", []).append(report)
+        race.setdefault("reports", []).append({
+            "driver": driver.strip(), "details": details.strip(),
+            "reported_by": interaction.user.id, "created_at": discord.utils.utcnow().isoformat(),
+        })
         save_json("races.json", data)
         await interaction.response.send_message("The incident has been submitted to Race Control.", ephemeral=True)
 
@@ -159,7 +163,10 @@ class Races(commands.Cog):
         if not race:
             await interaction.response.send_message("That race record could not be found.", ephemeral=True)
             return
-        race.setdefault("penalties", []).append({"driver": driver.strip(), "points": points, "reason": reason.strip(), "issued_by": interaction.user.id, "created_at": discord.utils.utcnow().isoformat()})
+        race.setdefault("penalties", []).append({
+            "driver": driver.strip(), "points": points, "reason": reason.strip(),
+            "issued_by": interaction.user.id, "created_at": discord.utils.utcnow().isoformat(),
+        })
         save_json("races.json", data)
         await interaction.response.send_message("Race Control has issued the ruling and updated the official record.", ephemeral=True)
 
@@ -168,7 +175,7 @@ class Races(commands.Cog):
             await interaction.response.send_message("This command must be used inside a server text channel.", ephemeral=True)
             return
         data = load_json("races.json", {"races": []})
-        race = next((r for r in data.get("races", []) if r.get("channel_id") == interaction.channel.id), None)
+        race = next((item for item in data.get("races", []) if item.get("channel_id") == interaction.channel.id), None)
         if not race:
             await interaction.response.send_message("This channel is not linked to a race record.", ephemeral=True)
             return
@@ -176,8 +183,15 @@ class Races(commands.Cog):
         save_json("races.json", data)
         overwrite = interaction.channel.overwrites_for(interaction.guild.default_role)
         overwrite.send_messages = False if locked else None
-        await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=overwrite, reason="Cirrus Racing Club event lockdown")
-        await interaction.response.send_message("The event channel is now **locked**." if locked else "The event channel is now **open**.", ephemeral=True)
+        await interaction.channel.set_permissions(
+            interaction.guild.default_role,
+            overwrite=overwrite,
+            reason="Cirrus Racing Club event lockdown",
+        )
+        await interaction.response.send_message(
+            "The event channel is now **locked**." if locked else "The event channel is now **open**.",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="lockdown", description="Lock the current race event channel.")
     @app_commands.default_permissions(manage_guild=True)
@@ -214,7 +228,6 @@ class Races(commands.Cog):
 
     @tasks.loop(minutes=1)
     async def reminder_loop(self):
-        await self.bot.wait_until_ready()
         data = load_json("races.json", {"races": []})
         changed = False
         now = datetime.now(timezone.utc)
@@ -231,7 +244,10 @@ class Races(commands.Cog):
                     channel = self.bot.get_channel(channel_id)
                     if channel:
                         label = "24 hours" if window == 86400 else "1 hour"
-                        await channel.send(f"**Race Reminder**\n{race['name']} begins in approximately {label}. Race Control has the event record prepared.")
+                        await channel.send(
+                            f"**Race Reminder**\n{race['name']} begins in approximately {label}. "
+                            "Race Control has the event record prepared."
+                        )
                         sent.append(key)
                         changed = True
         if changed:
