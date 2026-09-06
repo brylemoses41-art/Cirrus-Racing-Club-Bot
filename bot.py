@@ -9,19 +9,15 @@ from utils import bot_embed
 load_dotenv()
 TOKEN = get_token()
 
-
 intents = discord.Intents.default()
 
-bot = commands.Bot(
-    command_prefix="!",
-    intents=intents,
-)
-
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 COGS = (
     "cogs.drivers",
-    "cogs.championship",
     "cogs.races",
+    "cogs.standings",
+    "cogs.control",
 )
 
 
@@ -52,38 +48,40 @@ async def on_app_command_error(
     error: discord.app_commands.AppCommandError,
 ):
     print(f"Slash command error: {error}")
-
-    message = "❌ Something went wrong while running that command."
-
+    message = "Something went wrong while running that command."
     if interaction.response.is_done():
         await interaction.followup.send(message, ephemeral=True)
     else:
         await interaction.response.send_message(message, ephemeral=True)
 
 
-@bot.tree.command(name="help", description="Show Cirrus Racing Club bot commands.")
+@bot.tree.command(name="help", description="Show Cirrus Racing Club commands.")
 async def help_command(interaction: discord.Interaction):
     embed = bot_embed(
-        "🏁 Cirrus Racing Club",
-        "Current bot commands are being built.",
+        "Cirrus Racing Club",
+        "The official command desk for drivers and Race Control.",
     )
-
     embed.add_field(
-        name="👤 Drivers",
-        value="`/rename` • `/manage_driver`",
+        name="Driver Registry",
+        value="`/register`  `/drivers`  `/driver`",
         inline=False,
     )
     embed.add_field(
-        name="🏆 Championship",
-        value="`/championship`",
+        name="Race Administration",
+        value="`/create_race`  `/race`  `/qualifying`  `/results`",
         inline=False,
     )
     embed.add_field(
-        name="🏁 Racing",
-        value="`/race`",
+        name="Championship",
+        value="`/standings`  `/championship`",
         inline=False,
     )
-
+    embed.add_field(
+        name="Race Control",
+        value="`/report`  `/penalty`  `/lockdown`  `/open`",
+        inline=False,
+    )
+    embed.set_footer(text="Cirrus Racing Club • Official Command Desk")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
