@@ -9,6 +9,7 @@ from utils import bot_embed
 load_dotenv()
 TOKEN = get_token()
 
+
 intents = discord.Intents.default()
 
 bot = commands.Bot(
@@ -17,15 +18,32 @@ bot = commands.Bot(
 )
 
 
+COGS = (
+    "cogs.drivers",
+    "cogs.championship",
+    "cogs.races",
+)
+
+
 @bot.event
-async def on_ready():
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+async def setup_hook():
+    for extension in COGS:
+        try:
+            await bot.load_extension(extension)
+            print(f"Loaded {extension}")
+        except Exception as error:
+            print(f"Failed to load {extension}: {error}")
 
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} slash command(s).")
     except Exception as error:
         print(f"Failed to sync slash commands: {error}")
+
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
 
 
 @bot.tree.error
@@ -47,12 +65,22 @@ async def on_app_command_error(
 async def help_command(interaction: discord.Interaction):
     embed = bot_embed(
         "🏁 Cirrus Racing Club",
-        "Bot commands will be listed here as we build them.",
+        "Current bot commands are being built.",
     )
 
     embed.add_field(
-        name="🛠️ Status",
-        value="Bot foundation is online.",
+        name="👤 Drivers",
+        value="`/rename` • `/manage_driver`",
+        inline=False,
+    )
+    embed.add_field(
+        name="🏆 Championship",
+        value="`/championship`",
+        inline=False,
+    )
+    embed.add_field(
+        name="🏁 Racing",
+        value="`/race`",
         inline=False,
     )
 
