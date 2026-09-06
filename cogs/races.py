@@ -29,6 +29,21 @@ class Races(commands.Cog):
         except ValueError:
             return None
 
+    @staticmethod
+    def qualifying_table(qualifying):
+        lines = [
+            "```text",
+            "POS  DRIVER                         LAP",
+            "────────────────────────────────────────────",
+        ]
+        for entry in qualifying:
+            position = str(entry.get("position", "—"))
+            driver = str(entry.get("driver", "—"))[:28]
+            lap_time = str(entry.get("lap_time", "—"))
+            lines.append(f"P{position:<3} {driver:<28} {lap_time}")
+        lines.append("```")
+        return "\n".join(lines)
+
     async def get_event_channel(self, guild, race, data):
         if race.get("channel_id"):
             channel = guild.get_channel(race["channel_id"])
@@ -91,7 +106,7 @@ class Races(commands.Cog):
         embed.set_footer(text="Cirrus Racing Club • Race Control")
         await interaction.followup.send(embed=embed)
 
-    @app_commands.command(name="qualifying", description="Record a driver's qualifying result.")
+    @app_commands.command(name="qualifying", description="Record a driver's qualifying result and update the grid.")
     @app_commands.describe(race_id="Race record ID", driver="Driver name", lap_time="Qualifying lap time", position="Grid position")
     @app_commands.default_permissions(manage_guild=True)
     async def qualifying(self, interaction: discord.Interaction, race_id: str, driver: str, lap_time: str, position: int):
@@ -103,10 +118,35 @@ class Races(commands.Cog):
         if position < 1:
             await interaction.response.send_message("Grid position must be 1 or greater.", ephemeral=True)
             return
-        race.setdefault("qualifying", []).append({"driver": driver.strip(), "lap_time": lap_time.strip(), "position": position})
+
+        race.setdefault("qualifying", []).append({
+            "driver": driver.strip(),
+            "lap_time": lap_time.strip(),
+            "position": position,
+        })
         race["qualifying"].sort(key=lambda item: item.get("position", 999))
         save_json("races.json", data)
-        await interaction.response.send_message(f"Qualifying has been recorded: **P{position} — {driver} — {lap_time}**.", ephemeral=True)
+
+        embed = bot_embed(
+            "Qualifying Grid",
+            f"**{race['name']}** · `{race['id']}`\n{race.get('track', '—')}",
+        )
+        embed.add_field(
+            name="Starting Grid",
+            value=self.qualifying_table(race["qualifying"]),
+            inline=False,
+        )
+        embed.set_footer(text="Cirrus Racing Club • Official Qualifying")
+
+        if interaction.guild and race.get("channel_id"):
+            channel = interaction.guild.get_channel(race["channel_id"])
+            if channel:
+                await channel.send(embed=embed)
+
+        await interaction.response.send_message(
+            f"Qualifying has been recorded: **P{position} — {driver} — {lap_time}**.",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="results", description="Record an official race result and publish it to the event channel.")
     @app_commands.describe(race_id="Race record ID", driver="Driver name", position="Finishing position")
@@ -224,7 +264,7 @@ class Races(commands.Cog):
             if channel:
                 embed.add_field(name="Event Channel", value=channel.mention, inline=False)
         if race.get("qualifying"):
-            embed.add_field(name="Grid", value="\n".join(f"P{q['position']} — {q['driver']} ({q['lap_time']})" for q in race["qualifying"]), inline=False)
+            embed.add_field(name="Grid", value=self.qualifying_table(race["qualifying"]), inline=False)
         if race.get("results"):
             embed.add_field(name="Results", value="\n".join(f"P{r['position']} — {r['driver']} ({r['points']} pts)" for r in race["results"]), inline=False)
         await interaction.response.send_message(embed=embed)
