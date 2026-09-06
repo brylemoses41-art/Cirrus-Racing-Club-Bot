@@ -3,7 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from storage import load_json, save_json
-from utils import bot_embed
+from utils import bot_embed, set_crc_footer
 
 
 class Drivers(commands.Cog):
@@ -29,9 +29,9 @@ class Drivers(commands.Cog):
             "registered_at": discord.utils.utcnow().isoformat(),
         }
         save_json("drivers.json", data)
-        embed = bot_embed("Driver Registry", "Your registration is in order.")
+        embed = bot_embed("Driver Registry", "Your registration has been entered into the official record.")
         embed.add_field(name="Driver", value=f"**{name}**", inline=False)
-        embed.set_footer(text="Cirrus Racing Club • Official Record")
+        set_crc_footer(embed, "Official Driver Registry")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="drivers", description="View the registered Cirrus Racing Club drivers.")
@@ -42,8 +42,8 @@ class Drivers(commands.Cog):
             return
         entries.sort(key=lambda item: item.get("name", "").lower())
         embed = bot_embed("Driver Registry", "Registered drivers of Cirrus Racing Club.")
-        embed.description = "\n".join(f"**{i}.** {entry.get('name', 'Unnamed')}" for i, entry in enumerate(entries, 1))
-        embed.set_footer(text=f"{len(entries)} registered driver(s)")
+        embed.description = "\n".join(f"`{i:02d}`  **{entry.get('name', 'Unnamed')}**" for i, entry in enumerate(entries, 1))
+        set_crc_footer(embed, f"{len(entries)} registered driver(s)")
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="driver", description="View a driver's profile and statistics.")
@@ -66,12 +66,12 @@ class Drivers(commands.Cog):
         points = sum(int(r.get("points", 0)) for r in results)
         points -= sum(int(p.get("points", 0)) for race in races for p in race.get("penalties", []) if p.get("driver", "").lower() == name.lower())
 
-        embed = bot_embed("Driver Profile", f"**{name}**")
-        embed.add_field(name="Starts", value=str(starts), inline=True)
-        embed.add_field(name="Wins", value=str(wins), inline=True)
-        embed.add_field(name="Podiums", value=str(podiums), inline=True)
-        embed.add_field(name="Championship Points", value=str(points), inline=False)
-        embed.set_footer(text="Cirrus Racing Club • Official Record")
+        embed = bot_embed("Driver Record", f"**{name}**\nOfficial competition statistics")
+        embed.add_field(name="STARTS", value=f"`{starts}`", inline=True)
+        embed.add_field(name="WINS", value=f"`{wins}`", inline=True)
+        embed.add_field(name="PODIUMS", value=f"`{podiums}`", inline=True)
+        embed.add_field(name="CHAMPIONSHIP POINTS", value=f"**{points}**", inline=False)
+        set_crc_footer(embed, "Driver Records")
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="rename", description="Rename a registered driver.")
@@ -96,7 +96,12 @@ class Drivers(commands.Cog):
         if not entry:
             await interaction.response.send_message("That driver is not on the registry.", ephemeral=True)
             return
-        await interaction.response.send_message(f"**{entry.get('name')}** — Discord ID `{entry.get('discord_id')}`", ephemeral=True)
+        embed = bot_embed("Driver Record", "Internal Race Control reference.")
+        embed.add_field(name="Driver", value=f"**{entry.get('name')}**", inline=False)
+        embed.add_field(name="Discord ID", value=f"`{entry.get('discord_id')}`", inline=False)
+        embed.add_field(name="Registered", value=entry.get("registered_at", "—"), inline=False)
+        set_crc_footer(embed, "Race Control")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
