@@ -3,21 +3,33 @@ from __future__ import annotations
 from constants import points_for_position
 from storage import load_json, save_json
 
-# CRC driver progression uses a larger XP scale so ranks feel like real progression.
+# Official CRC driver progression ladder.
 # Championship points remain separate from XP.
 RANKS = (
     (0, "Rookie", "🟢"),
-    (5_000, "Novice", "🔵"),
-    (15_000, "Semi-Pro", "🟣"),
-    (30_000, "Master", "🟠"),
-    (50_000, "Elite", "🔴"),
+    (1_000, "Novice", "🔵"),
+    (4_000, "Semi-Pro", "🟣"),
+    (7_500, "Pro", "🟡"),
+    (12_000, "Master", "🟠"),
+    (20_000, "Elite", "🔴"),
 )
 
 RANK_ROLE_NAMES = tuple(rank[1] for rank in RANKS)
 
-# XP is intentionally scaled up from championship points.
-# A driver's race points are multiplied by 100 for progression XP.
-XP_POINT_MULTIPLIER = 100
+# XP rewards per race.
+# 500 XP participation is the minimum reward; finishing position adds XP.
+XP_BY_POSITION = {
+    1: 1_000,
+    2: 900,
+    3: 800,
+    4: 700,
+    5: 600,
+    6: 500,
+    7: 400,
+    8: 300,
+    9: 200,
+    10: 100,
+}
 PARTICIPATION_XP = 500
 QUALIFYING_BONUS_XP = 500
 CLEAN_RACE_BONUS_XP = 500
@@ -91,10 +103,19 @@ def calculate_driver_xp(driver_name: str, races: list[dict]) -> int:
     xp = 0
     for race in races:
         for result in race.get("results", []):
-            if str(result.get("driver", "")).strip().lower() == target:
-                # Race/bonus points are converted to progression XP at 100x.
-                xp += official_result_points(race, result) * XP_POINT_MULTIPLIER
-                xp += PARTICIPATION_XP
+            if str(result.get("driver", "")).strip().lower() != target:
+                continue
+
+            position = int(result.get("position", 0) or 0)
+            xp += PARTICIPATION_XP
+            xp += XP_BY_POSITION.get(position, 0)
+
+            fastest = fastest_qualifying_driver(race)
+            if fastest and fastest.strip().lower() == target:
+                xp += QUALIFYING_BONUS_XP
+
+            if is_clean_race(race, driver_name):
+                xp += CLEAN_RACE_BONUS_XP
     return xp
 
 
