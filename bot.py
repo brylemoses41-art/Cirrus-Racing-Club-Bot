@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 from config import get_token
 from constants import points_for_position
+from dashboard import start_dashboard
 from storage import load_json, save_json
 from utils import bot_embed
 
@@ -122,7 +123,6 @@ async def test_commands(interaction: discord.Interaction):
     checks = []
     registered = {command.name: command for command in bot.tree.get_commands()}
 
-    # 1. Every expected slash command exists and has a callback.
     for name, label in expected_commands.items():
         command = registered.get(name)
         if command is None:
@@ -133,7 +133,6 @@ async def test_commands(interaction: discord.Interaction):
             continue
         checks.append(("✅", name, label))
 
-    # 2. Verify command callbacks are actually async functions.
     async_failures = []
     for name in expected_commands:
         command = registered.get(name)
@@ -144,7 +143,6 @@ async def test_commands(interaction: discord.Interaction):
     else:
         checks.append(("✅", "callbacks", "All command callbacks are asynchronous"))
 
-    # 3. Verify every command exposes the parameters expected by its callback.
     parameter_failures = []
     for name in expected_commands:
         command = registered.get(name)
@@ -159,7 +157,6 @@ async def test_commands(interaction: discord.Interaction):
     else:
         checks.append(("✅", "parameters", "All commands accept a Discord interaction"))
 
-    # 4. Verify persistent data files and their structures.
     try:
         drivers_data = load_json("drivers.json", {"drivers": {}})
         races_data = load_json("races.json", {"races": []})
@@ -176,7 +173,6 @@ async def test_commands(interaction: discord.Interaction):
     except Exception as error:
         checks.append(("❌", "storage", str(error)))
 
-    # 5. Verify JSON writing without altering real records.
     test_file = ".command_test.tmp"
     test_path = Path(__file__).resolve().parent / "data" / test_file
     try:
@@ -194,7 +190,6 @@ async def test_commands(interaction: discord.Interaction):
             except OSError:
                 pass
 
-    # 6. Verify all cogs are loaded.
     cog_names = ("Drivers", "Races", "Championship", "Calendar")
     missing_cogs = [name for name in cog_names if bot.get_cog(name) is None]
     if missing_cogs:
@@ -202,7 +197,6 @@ async def test_commands(interaction: discord.Interaction):
     else:
         checks.append(("✅", "cogs", "Drivers, Races, Championship, and Calendar loaded"))
 
-    # 7. Exercise pure race logic without creating channels or changing real race records.
     try:
         races_cog = bot.get_cog("Races")
         sample_races = [
@@ -225,17 +219,8 @@ async def test_commands(interaction: discord.Interaction):
     except Exception as error:
         checks.append(("❌", "race logic", str(error)))
 
-    # 8. Verify championship points logic for every scoring position.
     try:
-        expected_points = {
-            1: 5,
-            2: 4,
-            3: 3,
-            4: 2,
-            5: 1,
-            20: 1,
-            21: 0,
-        }
+        expected_points = {1: 5, 2: 4, 3: 3, 4: 2, 5: 1, 20: 1, 21: 0}
         failures = [
             f"P{position}={points_for_position(position)}"
             for position, expected in expected_points.items()
@@ -247,7 +232,6 @@ async def test_commands(interaction: discord.Interaction):
     except Exception as error:
         checks.append(("❌", "points", str(error)))
 
-    # 9. Verify there are no unexpected slash commands besides this diagnostic.
     extra = sorted(set(registered) - set(expected_commands) - {"test_commands"})
     if extra:
         checks.append(("ℹ️", "commands", f"Additional commands: {', '.join(extra)}"))
@@ -263,18 +247,11 @@ async def test_commands(interaction: discord.Interaction):
         "CRC Bot Diagnostics",
         "Every registered command has been checked for wiring, callbacks, parameters, storage dependencies, and safe underlying logic. No real race, driver, penalty, or channel changes were made.",
     )
-    embed.add_field(
-        name="Result",
-        value=f"**{passed} passed** · **{failed} failed**",
-        inline=False,
-    )
-    embed.add_field(
-        name="Diagnostic Report",
-        value="\n".join(lines),
-        inline=False,
-    )
+    embed.add_field(name="Result", value=f"**{passed} passed** · **{failed} failed**", inline=False)
+    embed.add_field(name="Diagnostic Report", value="\n".join(lines), inline=False)
     embed.set_footer(text="Cirrus Racing Club • Race Control Diagnostics")
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 
+start_dashboard()
 bot.run(TOKEN)
