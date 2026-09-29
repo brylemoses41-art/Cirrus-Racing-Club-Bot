@@ -1,8 +1,14 @@
+import asyncio
+import json
+import urllib.request
+
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from config import DISCORD_TOKEN, GUILD_ID, OWNER_IDS
+
+PLAN_URL = "https://raw.githubusercontent.com/brylemoses41-art/Cirrus-Racing-Club-Bot/main/data/server_plan.json"
 
 
 class ControlBot(commands.Bot):
@@ -18,7 +24,10 @@ class ControlBot(commands.Bot):
         )
 
     async def setup_hook(self):
-        await self.tree.sync()
+        guild = discord.Object(id=GUILD_ID)
+        self.tree.copy_global_to(guild=guild)
+        await self.tree.sync(guild=guild)
+        plan_watcher.start()
 
     async def on_ready(self):
         print(f"Logged in as {self.user} ({self.user.id})")
@@ -30,67 +39,170 @@ bot = ControlBot()
 
 def owner_only():
     async def predicate(interaction: discord.Interaction) -> bool:
+        if interaction.guild is None:
+            return False
         return interaction.user.id in OWNER_IDS or interaction.user.id == interaction.guild.owner_id
     return app_commands.check(predicate)
+
+
+async def fetch_plan():
+    def read():
+        with urllib.request.urlopen(PLAN_URL, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+    return await asyncio.to_thread(read)
+
+
+def build_overwrite(role, settings):
+    overwrite = discord.PermissionOverwrite()
+    for permission, value in settings.items():
+        if hasattr(overwrite, permission):
+            setattr(overwrite, permission, value if value in (True, False) else None)
+    return overwrite
+
+
+async def apply_plan(guild: discord.Guild, plan: dict):
+    changes = []
+    roles_by_name = {role.name: role for role in guild.roles}
+
+    for spec in plan.get("roles", []):
+        name = spec["name"]
+        role = roles_by_name.get(name)
+        permissions = discord.Permissions.none()
+
+        for permission, value in spec.get("permissions", {}).items():
+            if hasattr(permissions, permission):
+                setattr(permissions, permission, bool(value))
+
+        if role is None:
+            role = await guild.create_role(
+                name=name,
+                permissions=permissions,
+                reason="Declarative server plan",
+            )
+            changes.append(f"created role {name}")
+        elif not role.is_default() and role.permissions != permissions:
+            await role.edit(
+                permissions=permissions,
+                reason="Declarative server plan",
+            )
+            changes.append(f"updated permissions for role {name}")
+
+        roles_by_name[name] = role
+
+    categories_by_name = {c.name: c for c in guild.categories}
+
+    for spec in plan.get("categories", []):
+        name = spec["name"]
+        category = categories_by_name.get(name)
+
+        if category is None:
+            category = await guild.create_category(
+                name=name,
+                reason="Declarative server plan",
+            )
+            changes.append(f"created category {name}")
+
+        overwrites = {}
+        for role_name, settings in spec.get("permissions", {}).items():
+            role = roles_by_name.get(role_name)
+            if role:
+                overwrites[role] = build_overwrite(role, settings)
+
+        if overwrites:
+            await category.edit(
+                overwrites=overwrites,
+                reason="Declarative server plan",
+            )
+            changes.append(f"updated permissions for category {name}")
+
+        categories_by_name[name] = category
+
+    channels_by_name = {channel.name: channel for channel in guild.channels}
+
+    for spec in plan.get("channels", []):
+        name = spec["name"]
+        kind = spec.get("type", "text")
+        category = categories_by_name.get(spec.get("category"))
+        channel = channels_by_name.get(name)
+
+        if channel is None:
+            if kind == "voice":
+                channel = await guild.create_voice_channel(
+                    name=name,
+                    category=category,
+                    reason="Declarative server plan",
+                )
+            else:
+                channel = await guild.create_text_channel(
+                    name=name,
+                    category=category,
+                    reason="Declarative server plan",
+                )
+            changes.append(f"created {kind} channel {name}")
+        elif category and channel.category_id != category.id:
+            await channel.edit(
+                category=category,
+                reason="Declarative server plan",
+            )
+            changes.append(f"moved {name} into {category.name}")
+
+        overwrites = {}
+        for role_name, settings in spec.get("permissions", {}).items():
+            role = roles_by_name.get(role_name)
+            if role:
+                overwrites[role] = build_overwrite(role, settings)
+
+        if overwrites:
+            await channel.edit(
+                overwrites=overwrites,
+                reason="Declarative server plan",
+            )
+            changes.append(f"updated permissions for channel {name}")
+
+        channels_by_name[name] = channel
+
+    return changes
+
+
+@tasks.loop(seconds=10)
+async def plan_watcher():
+    if not bot.is_ready():
+        return
+
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+
+    try:
+        plan = await fetch_plan()
+        if not plan.get("enabled", False):
+            return
+
+        changes = await apply_plan(guild, plan)
+        if changes:
+            print("Applied server plan:")
+            for change in changes:
+                print(f" - {change}")
+    except Exception as error:
+        print(f"Server plan error: {error!r}")
+
+
+@plan_watcher.before_loop
+async def before_plan_watcher():
+    await bot.wait_until_ready()
 
 
 @bot.tree.command(name="server_info", description="Show basic information about this server.")
 @owner_only()
 async def server_info(interaction: discord.Interaction):
     guild = interaction.guild
-    if guild is None:
-        await interaction.response.send_message("This command only works in a server.", ephemeral=True)
-        return
-
     embed = discord.Embed(title=guild.name)
     embed.add_field(name="Server ID", value=str(guild.id), inline=False)
     embed.add_field(name="Owner", value=f"<@{guild.owner_id}>", inline=True)
     embed.add_field(name="Members", value=str(guild.member_count), inline=True)
     embed.add_field(name="Channels", value=str(len(guild.channels)), inline=True)
     embed.add_field(name="Roles", value=str(len(guild.roles)), inline=True)
-    embed.add_field(name="2FA for moderation", value="Required" if guild.mfa_level else "Not required", inline=True)
     await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-@bot.tree.command(name="create_category", description="Create a server category.")
-@app_commands.describe(name="Category name")
-@owner_only()
-async def create_category(interaction: discord.Interaction, name: str):
-    category = await interaction.guild.create_category(name=name, reason=f"Requested by {interaction.user}")
-    await interaction.response.send_message(f"Created category **{category.name}**.", ephemeral=True)
-
-
-@bot.tree.command(name="create_channel", description="Create a text channel.")
-@app_commands.describe(name="Channel name", category="Optional category")
-@owner_only()
-async def create_channel(interaction: discord.Interaction, name: str, category: discord.CategoryChannel | None = None):
-    channel = await interaction.guild.create_text_channel(name=name, category=category, reason=f"Requested by {interaction.user}")
-    await interaction.response.send_message(f"Created {channel.mention}.", ephemeral=True)
-
-
-@bot.tree.command(name="rename_channel", description="Rename a channel.")
-@app_commands.describe(channel="Channel to rename", name="New name")
-@owner_only()
-async def rename_channel(interaction: discord.Interaction, channel: discord.TextChannel, name: str):
-    await channel.edit(name=name, reason=f"Requested by {interaction.user}")
-    await interaction.response.send_message(f"Renamed channel to **{name}**.", ephemeral=True)
-
-
-@bot.tree.command(name="delete_channel", description="Delete a channel.")
-@app_commands.describe(channel="Channel to delete")
-@owner_only()
-async def delete_channel(interaction: discord.Interaction, channel: discord.abc.GuildChannel):
-    name = channel.name
-    await channel.delete(reason=f"Requested by {interaction.user}")
-    await interaction.response.send_message(f"Deleted **{name}**.", ephemeral=True)
-
-
-@bot.tree.command(name="create_role", description="Create a server role.")
-@app_commands.describe(name="Role name")
-@owner_only()
-async def create_role(interaction: discord.Interaction, name: str):
-    role = await interaction.guild.create_role(name=name, reason=f"Requested by {interaction.user}")
-    await interaction.response.send_message(f"Created role **{role.name}**.", ephemeral=True)
 
 
 @bot.tree.command(name="security_audit", description="Audit common server security settings.")
@@ -114,95 +226,42 @@ async def security_audit(interaction: discord.Interaction):
         if not role.is_default() and role.permissions.administrator
     ]
 
-    lines = []
-    lines.append("🔐 **Security audit**")
-    lines.append(f"• Server moderation 2FA: {'ON' if guild.mfa_level else 'OFF'}")
-    lines.append(f"• @everyone Administrator: {'YES' if everyone.permissions.administrator else 'NO'}")
-    lines.append(f"• Administrator roles: {len(dangerous_roles)}")
+    lines = [
+        "Security audit",
+        f"• Server moderation 2FA: {'ON' if guild.mfa_level else 'OFF'}",
+        f"• @everyone Administrator: {'YES' if everyone.permissions.administrator else 'NO'}",
+        f"• Administrator roles: {len(dangerous_roles)}",
+    ]
 
     if risky:
-        lines.append("\n⚠️ **@everyone risks**")
+        lines.append(" @everyone risks")
         lines.extend(f"• {item}" for item in risky)
     else:
-        lines.append("\n✅ No high-risk @everyone permissions found.")
+        lines.append(" No high-risk @everyone permissions found.")
 
     if dangerous_roles:
-        lines.append("\n⚠️ **Administrator roles**")
+        lines.append(" Administrator roles")
         lines.extend(f"• {role.name}" for role in dangerous_roles[:20])
     else:
-        lines.append("\n✅ No non-default Administrator roles found.")
+        lines.append(" No non-default Administrator roles found.")
 
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 
-@bot.tree.command(name="lockdown", description="Temporarily prevent @everyone from sending messages in text channels.")
+@bot.tree.command(name="plan_status", description="Show whether remote server automation is enabled.")
 @owner_only()
-async def lockdown(interaction: discord.Interaction):
-    changed = 0
-    everyone = interaction.guild.default_role
-
-    for channel in interaction.guild.text_channels:
-        overwrite = channel.overwrites_for(everyone)
-        overwrite.send_messages = False
-        try:
-            await channel.set_permissions(everyone, overwrite=overwrite, reason=f"Emergency lockdown by {interaction.user}")
-            changed += 1
-        except discord.Forbidden:
-            pass
-
-    await interaction.response.send_message(f"Lockdown applied to {changed} text channels.", ephemeral=True)
-
-
-@bot.tree.command(name="unlock", description="Remove the bot's lockdown restriction from text channels.")
-@owner_only()
-async def unlock(interaction: discord.Interaction):
-    changed = 0
-    everyone = interaction.guild.default_role
-
-    for channel in interaction.guild.text_channels:
-        overwrite = channel.overwrites_for(everyone)
-        overwrite.send_messages = None
-        try:
-            await channel.set_permissions(everyone, overwrite=overwrite, reason=f"Unlock by {interaction.user}")
-            changed += 1
-        except discord.Forbidden:
-            pass
-
-    await interaction.response.send_message(f"Lockdown restriction removed from {changed} text channels.", ephemeral=True)
-
-
-@bot.tree.command(name="announce", description="Send an announcement to a selected text channel.")
-@app_commands.describe(channel="Destination channel", message="Announcement text")
-@owner_only()
-async def announce(interaction: discord.Interaction, channel: discord.TextChannel, message: str):
-    await channel.send(message)
-    await interaction.response.send_message(f"Announcement sent to {channel.mention}.", ephemeral=True)
-
-
-@bot.tree.command(name="bot_invite", description="Generate a standard OAuth2 invite link for another Discord bot.")
-@app_commands.describe(client_id="The other bot application's client ID")
-@owner_only()
-async def bot_invite(interaction: discord.Interaction, client_id: str):
-    if not client_id.isdigit():
-        await interaction.response.send_message("Client ID must be numeric.", ephemeral=True)
-        return
-
-    permissions = discord.Permissions(
-        view_channel=True,
-        send_messages=True,
-        read_message_history=True,
-    )
-    url = discord.utils.oauth_url(
-        int(client_id),
-        permissions=permissions,
-        scopes=("bot", "applications.commands"),
-        guild=interaction.guild,
-        disable_guild_select=False,
-    )
-    await interaction.response.send_message(
-        f"Invite link generated. Discord still requires an authorized user with permission to install the bot.\n{url}",
-        ephemeral=True,
-    )
+async def plan_status(interaction: discord.Interaction):
+    try:
+        plan = await fetch_plan()
+        await interaction.response.send_message(
+            f"Remote server automation: {'ON' if plan.get('enabled') else 'OFF'}",
+            ephemeral=True,
+        )
+    except Exception as error:
+        await interaction.response.send_message(
+            f"Could not read the server plan: {error}",
+            ephemeral=True,
+        )
 
 
 @bot.tree.error
@@ -224,6 +283,6 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 if not DISCORD_TOKEN:
     raise RuntimeError("DISCORD_TOKEN is missing.")
 if not GUILD_ID:
-    print("Warning: GUILD_ID is not set; commands will sync globally.")
+    raise RuntimeError("GUILD_ID is required for server automation.")
 
 bot.run(DISCORD_TOKEN)
