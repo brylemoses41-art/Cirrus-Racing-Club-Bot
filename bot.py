@@ -1,226 +1,229 @@
-import asyncio
-import inspect
-from pathlib import Path
-
 import discord
-from discord.ext import commands, tasks
-from dotenv import load_dotenv
+from discord import app_commands
+from discord.ext import commands
 
-from config import get_token
-from constants import points_for_position
-from dashboard_app import start_dashboard
-from dashboard import set_bot
-from rank_system import RANKS, reconcile_driver_records
-from storage import load_json, save_json
-from utils import bot_embed
+from config import DISCORD_TOKEN, GUILD_ID, OWNER_IDS
 
 
-load_dotenv()
-TOKEN = get_token()
+class ControlBot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.guilds = True
+        intents.members = True
+        intents.messages = True
+        super().__init__(
+            command_prefix="!",
+            intents=intents,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
-intents = discord.Intents.default()
-bot = commands.Bot(command_prefix="!", intents=intents)
+    async def setup_hook(self):
+        await self.tree.sync()
 
-# dashboard_v2 still calls this value "rating" internally for backwards
-# compatibility. It now represents CRC rank XP and uses the real five ranks.
-import dashboard_v2
-
-dashboard_v2.RANKS = tuple((threshold, name.upper(), badge) for threshold, name, badge in RANKS)
-
-COGS = (
-    "cogs.drivers",
-    "cogs.races",
-    "cogs.championship",
-    "cogs.calendar",
-)
-
-
-async def sync_rank_roles(changes: dict[str, dict] | None = None):
-    """Apply the driver's current CRC rank as a Discord role in every guild."""
-    drivers = load_json("drivers.json", {"drivers": {}}).get("drivers", {})
-    wanted = {str(entry.get("discord_id")): entry for entry in drivers.values() if entry.get("discord_id")}
-    changed_ids = set(changes or wanted)
-
-    for discord_id, entry in wanted.items():
-        change = changes.get(discord_id) if changes else None
-        if changes and discord_id not in changed_ids:
-            continue
-        if changes and change and change.get("old_rank") == change.get("rank"):
-            # XP changed but the rank did not. No Discord role work is needed.
-            continue
-
-        rank_name = str(entry.get("rank", "Rookie"))
-        for guild in bot.guilds:
-            try:
-                member = guild.get_member(int(discord_id))
-                if member is None:
-                    member = await guild.fetch_member(int(discord_id))
-
-                rank_roles = [role for role in guild.roles if role.name in RANKS_NAMES]
-                role = discord.utils.get(guild.roles, name=rank_name)
-                if role is None:
-                    role = await guild.create_role(name=rank_name, reason="CRC automatic driver rank")
-
-                remove_roles = [r for r in rank_roles if r != role and r in member.roles]
-                if remove_roles:
-                    await member.remove_roles(*remove_roles, reason="CRC rank progression")
-                if role not in member.roles:
-                    await member.add_roles(role, reason="CRC rank progression")
-            except (discord.Forbidden, discord.HTTPException, ValueError) as error:
-                print(f"Rank role sync failed for {entry.get('name')} in {guild.name}: {error}")
+    async def on_ready(self):
+        print(f"Logged in as {self.user} ({self.user.id})")
+        print(f"Connected to {len(self.guilds)} guild(s).")
 
 
-RANKS_NAMES = {rank[1] for rank in RANKS}
+bot = ControlBot()
 
 
-async def reconcile_and_sync():
-    changes = await asyncio.to_thread(reconcile_driver_records)
-    await sync_rank_roles(changes)
+def owner_only():
+    async def predicate(interaction: discord.Interaction) -> bool:
+        return interaction.user.id in OWNER_IDS or interaction.user.id == interaction.guild.owner_id
+    return app_commands.check(predicate)
 
 
-@tasks.loop(seconds=30)
-async def crc_rank_loop():
-    try:
-        await reconcile_and_sync()
-    except Exception as error:
-        print(f"CRC rank sync failed: {error}")
+@bot.tree.command(name="server_info", description="Show basic information about this server.")
+@owner_only()
+async def server_info(interaction: discord.Interaction):
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message("This command only works in a server.", ephemeral=True)
+        return
+
+    embed = discord.Embed(title=guild.name)
+    embed.add_field(name="Server ID", value=str(guild.id), inline=False)
+    embed.add_field(name="Owner", value=f"<@{guild.owner_id}>", inline=True)
+    embed.add_field(name="Members", value=str(guild.member_count), inline=True)
+    embed.add_field(name="Channels", value=str(len(guild.channels)), inline=True)
+    embed.add_field(name="Roles", value=str(len(guild.roles)), inline=True)
+    embed.add_field(name="2FA for moderation", value="Required" if guild.mfa_level else "Not required", inline=True)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-@crc_rank_loop.before_loop
-async def before_crc_rank_loop():
-    await bot.wait_until_ready()
+@bot.tree.command(name="create_category", description="Create a server category.")
+@app_commands.describe(name="Category name")
+@owner_only()
+async def create_category(interaction: discord.Interaction, name: str):
+    category = await interaction.guild.create_category(name=name, reason=f"Requested by {interaction.user}")
+    await interaction.response.send_message(f"Created category **{category.name}**.", ephemeral=True)
 
 
-@bot.event
-async def setup_hook():
-    for extension in COGS:
+@bot.tree.command(name="create_channel", description="Create a text channel.")
+@app_commands.describe(name="Channel name", category="Optional category")
+@owner_only()
+async def create_channel(interaction: discord.Interaction, name: str, category: discord.CategoryChannel | None = None):
+    channel = await interaction.guild.create_text_channel(name=name, category=category, reason=f"Requested by {interaction.user}")
+    await interaction.response.send_message(f"Created {channel.mention}.", ephemeral=True)
+
+
+@bot.tree.command(name="rename_channel", description="Rename a channel.")
+@app_commands.describe(channel="Channel to rename", name="New name")
+@owner_only()
+async def rename_channel(interaction: discord.Interaction, channel: discord.TextChannel, name: str):
+    await channel.edit(name=name, reason=f"Requested by {interaction.user}")
+    await interaction.response.send_message(f"Renamed channel to **{name}**.", ephemeral=True)
+
+
+@bot.tree.command(name="delete_channel", description="Delete a channel.")
+@app_commands.describe(channel="Channel to delete")
+@owner_only()
+async def delete_channel(interaction: discord.Interaction, channel: discord.abc.GuildChannel):
+    name = channel.name
+    await channel.delete(reason=f"Requested by {interaction.user}")
+    await interaction.response.send_message(f"Deleted **{name}**.", ephemeral=True)
+
+
+@bot.tree.command(name="create_role", description="Create a server role.")
+@app_commands.describe(name="Role name")
+@owner_only()
+async def create_role(interaction: discord.Interaction, name: str):
+    role = await interaction.guild.create_role(name=name, reason=f"Requested by {interaction.user}")
+    await interaction.response.send_message(f"Created role **{role.name}**.", ephemeral=True)
+
+
+@bot.tree.command(name="security_audit", description="Audit common server security settings.")
+@owner_only()
+async def security_audit(interaction: discord.Interaction):
+    guild = interaction.guild
+    everyone = guild.default_role
+    risky = []
+
+    if everyone.permissions.administrator:
+        risky.append("@everyone has Administrator.")
+    if everyone.permissions.manage_guild:
+        risky.append("@everyone can Manage Server.")
+    if everyone.permissions.manage_roles:
+        risky.append("@everyone can Manage Roles.")
+    if everyone.permissions.manage_channels:
+        risky.append("@everyone can Manage Channels.")
+
+    dangerous_roles = [
+        role for role in guild.roles
+        if not role.is_default() and role.permissions.administrator
+    ]
+
+    lines = []
+    lines.append("🔐 **Security audit**")
+    lines.append(f"• Server moderation 2FA: {'ON' if guild.mfa_level else 'OFF'}")
+    lines.append(f"• @everyone Administrator: {'YES' if everyone.permissions.administrator else 'NO'}")
+    lines.append(f"• Administrator roles: {len(dangerous_roles)}")
+
+    if risky:
+        lines.append("\n⚠️ **@everyone risks**")
+        lines.extend(f"• {item}" for item in risky)
+    else:
+        lines.append("\n✅ No high-risk @everyone permissions found.")
+
+    if dangerous_roles:
+        lines.append("\n⚠️ **Administrator roles**")
+        lines.extend(f"• {role.name}" for role in dangerous_roles[:20])
+    else:
+        lines.append("\n✅ No non-default Administrator roles found.")
+
+    await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+
+@bot.tree.command(name="lockdown", description="Temporarily prevent @everyone from sending messages in text channels.")
+@owner_only()
+async def lockdown(interaction: discord.Interaction):
+    changed = 0
+    everyone = interaction.guild.default_role
+
+    for channel in interaction.guild.text_channels:
+        overwrite = channel.overwrites_for(everyone)
+        overwrite.send_messages = False
         try:
-            await bot.load_extension(extension)
-            print(f"Loaded {extension}")
-        except Exception as error:
-            print(f"Failed to load {extension}: {error}")
+            await channel.set_permissions(everyone, overwrite=overwrite, reason=f"Emergency lockdown by {interaction.user}")
+            changed += 1
+        except discord.Forbidden:
+            pass
 
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} slash command(s).")
-    except Exception as error:
-        print(f"Failed to sync slash commands: {error}")
+    await interaction.response.send_message(f"Lockdown applied to {changed} text channels.", ephemeral=True)
 
 
-@bot.event
-async def on_ready():
-    set_bot(bot)
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    try:
-        await reconcile_and_sync()
-    except Exception as error:
-        print(f"Initial CRC rank sync failed: {error}")
-    if not crc_rank_loop.is_running():
-        crc_rank_loop.start()
+@bot.tree.command(name="unlock", description="Remove the bot's lockdown restriction from text channels.")
+@owner_only()
+async def unlock(interaction: discord.Interaction):
+    changed = 0
+    everyone = interaction.guild.default_role
+
+    for channel in interaction.guild.text_channels:
+        overwrite = channel.overwrites_for(everyone)
+        overwrite.send_messages = None
+        try:
+            await channel.set_permissions(everyone, overwrite=overwrite, reason=f"Unlock by {interaction.user}")
+            changed += 1
+        except discord.Forbidden:
+            pass
+
+    await interaction.response.send_message(f"Lockdown restriction removed from {changed} text channels.", ephemeral=True)
+
+
+@bot.tree.command(name="announce", description="Send an announcement to a selected text channel.")
+@app_commands.describe(channel="Destination channel", message="Announcement text")
+@owner_only()
+async def announce(interaction: discord.Interaction, channel: discord.TextChannel, message: str):
+    await channel.send(message)
+    await interaction.response.send_message(f"Announcement sent to {channel.mention}.", ephemeral=True)
+
+
+@bot.tree.command(name="bot_invite", description="Generate a standard OAuth2 invite link for another Discord bot.")
+@app_commands.describe(client_id="The other bot application's client ID")
+@owner_only()
+async def bot_invite(interaction: discord.Interaction, client_id: str):
+    if not client_id.isdigit():
+        await interaction.response.send_message("Client ID must be numeric.", ephemeral=True)
+        return
+
+    permissions = discord.Permissions(
+        view_channel=True,
+        send_messages=True,
+        read_message_history=True,
+    )
+    url = discord.utils.oauth_url(
+        int(client_id),
+        permissions=permissions,
+        scopes=("bot", "applications.commands"),
+        guild=interaction.guild,
+        disable_guild_select=False,
+    )
+    await interaction.response.send_message(
+        f"Invite link generated. Discord still requires an authorized user with permission to install the bot.\n{url}",
+        ephemeral=True,
+    )
 
 
 @bot.tree.error
-async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
-    print(f"Slash command error: {error}")
-    message = "Something went wrong while running that command."
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.CheckFailure):
+        message = "You are not authorized to use this command."
+    elif isinstance(error, app_commands.MissingPermissions):
+        message = "The bot does not have the Discord permissions required for that action."
+    else:
+        message = "The command failed. Check the bot logs for details."
+        print(repr(error))
+
     if interaction.response.is_done():
         await interaction.followup.send(message, ephemeral=True)
     else:
         await interaction.response.send_message(message, ephemeral=True)
 
 
-@bot.tree.command(name="help", description="Show Cirrus Racing Club commands.")
-async def help_command(interaction: discord.Interaction):
-    embed = bot_embed("Cirrus Racing Club", "The official command desk for drivers and Race Control.")
-    embed.add_field(name="Driver Registry", value="`/register`  `/drivers`  `/driver`", inline=False)
-    embed.add_field(name="Race Administration", value="`/create_race`  `/race`  `/qualifying`  `/results`  `/calendar`", inline=False)
-    embed.add_field(name="Championship", value="`/standings`  `/championship`", inline=False)
-    embed.add_field(name="Race Control", value="`/report`  `/penalty`  `/lockdown`  `/open`", inline=False)
-    embed.add_field(name="Automation", value="Automatic event channels, result posts, race reminders, rank XP, and Discord rank roles.", inline=False)
-    embed.set_footer(text="Cirrus Racing Club • Official Command Desk")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+if not DISCORD_TOKEN:
+    raise RuntimeError("DISCORD_TOKEN is missing.")
+if not GUILD_ID:
+    print("Warning: GUILD_ID is not set; commands will sync globally.")
 
-
-@bot.tree.command(name="test_commands", description="Run a full safe diagnostic of every bot command.")
-@discord.app_commands.default_permissions(manage_guild=True)
-async def test_commands(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    expected_commands = {"help":"Driver and Race Control command desk","register":"Driver registration","drivers":"Driver registry listing","driver":"Driver profile","rename":"Driver record rename","manage_driver":"Driver record inspection","create_race":"Race creation","qualifying":"Qualifying grid","results":"Race results","report":"Incident reports","penalty":"Championship penalties","lockdown":"Event channel lockdown","open":"Event channel reopening","race":"Race record display","calendar":"Official season calendar","standings":"Championship standings","championship":"Championship standings alias"}
-    checks=[]; registered={command.name:command for command in bot.tree.get_commands()}
-    for name,label in expected_commands.items():
-        command=registered.get(name)
-        if command is None: checks.append(("❌",name,f"{label} — command missing")); continue
-        if not callable(command.callback): checks.append(("❌",name,f"{label} — callback missing")); continue
-        checks.append(("✅",name,label))
-    async_failures=[name for name in expected_commands if registered.get(name) and not inspect.iscoroutinefunction(registered[name].callback)]
-    checks.append(("❌" if async_failures else "✅","callbacks",f"Not async: {', '.join(sorted(async_failures))}" if async_failures else "All command callbacks are asynchronous"))
-    parameter_failures=[]
-    for name in expected_commands:
-        command=registered.get(name)
-        if command and "interaction" not in inspect.signature(command.callback).parameters: parameter_failures.append(f"/{name}: interaction")
-    checks.append(("❌" if parameter_failures else "✅","parameters","; ".join(parameter_failures) if parameter_failures else "All commands accept a Discord interaction"))
-    try:
-        drivers_data=load_json("drivers.json",{"drivers":{}}); races_data=load_json("races.json",{"races":[]}); championship_data=load_json("championship.json",{"standings":{}})
-        if not isinstance(drivers_data.get("drivers"),dict) or not isinstance(races_data.get("races"),list) or not isinstance(championship_data,dict): raise ValueError("Invalid storage structure")
-        checks.append(("✅","storage","Driver, race, and championship data are readable"))
-    except Exception as error: checks.append(("❌","storage",str(error)))
-    test_file=".command_test.tmp"; test_path=Path(__file__).resolve().parent/"data"/test_file
-    try:
-        save_json(test_file,{"ok":True,"test":"crc"}); test_data=load_json(test_file,{})
-        if test_data.get("ok") is not True or test_data.get("test")!="crc": raise ValueError("write/read verification failed")
-        checks.append(("✅","storage","Temporary write/read test passed"))
-    except Exception as error: checks.append(("❌","storage",f"Write test failed — {error}"))
-    finally:
-        if test_path.exists():
-            try:test_path.unlink()
-            except OSError:pass
-    missing_cogs=[name for name in ("Drivers","Races","Championship","Calendar") if bot.get_cog(name) is None]
-    checks.append(("❌" if missing_cogs else "✅","cogs",f"Missing: {', '.join(missing_cogs)}" if missing_cogs else "Drivers, Races, Championship, and Calendar loaded"))
-    try:
-        races_cog=bot.get_cog("Races"); sample_races=[{"id":"CRC-26-001","name":"Diagnostic Race","status":"open"},{"id":"CRC-26-002","name":"Second Race","status":"locked"}]
-        found=races_cog.find_race(sample_races,"crc-26-001") if races_cog else None; missing=races_cog.find_race(sample_races,"CRC-26-999") if races_cog else None
-        table=races_cog.qualifying_table([{"position":1,"driver":"Diagnostic Driver","lap_time":"1:45.000"},{"position":2,"driver":"Second Driver","lap_time":"1:46.000"}]) if races_cog else ""
-        if not found or missing is not None or "P1" not in table or "Diagnostic Driver" not in table: raise ValueError("race logic failed")
-        checks.append(("✅","race logic","Race lookup and qualifying table passed"))
-    except Exception as error: checks.append(("❌","race logic",str(error)))
-    try:
-        expected_points={1:15,2:12,3:10,4:8,5:6,6:5,7:4,8:3,9:2,10:1,11:0,20:0}; failures=[f"P{p}={points_for_position(p)}" for p,e in expected_points.items() if points_for_position(p)!=e]
-        if failures: raise ValueError("; ".join(failures))
-        checks.append(("✅","points","Mazda Cup scoring logic passed (15 max + bonuses)"))
-    except Exception as error: checks.append(("❌","points",str(error)))
-    try:
-        rank_names=[rank[1] for rank in RANKS]
-        if rank_names != ["Rookie", "Novice", "Semi-Pro", "Master", "Elite"]: raise ValueError("rank progression configuration is invalid")
-        checks.append(("✅","ranks","Rookie → Novice → Semi-Pro → Master → Elite"))
-    except Exception as error: checks.append(("❌","ranks",str(error)))
-
-    passed=sum(s=="✅" for s,_,_ in checks); failed=sum(s=="❌" for s,_,_ in checks)
-    embed=bot_embed("CRC Bot Diagnostics","Every registered command has been checked for wiring, callbacks, parameters, storage dependencies, and safe underlying logic. No real race, driver, penalty, or channel changes were made.")
-    embed.add_field(name="Result",value=f"**{passed} passed** · **{failed} failed**",inline=False)
-
-    report_lines = [f"{s} **{n}** — {d}" for s, n, d in checks]
-    report_chunks = []
-    current = ""
-    for line in report_lines:
-        if len(current) + len(line) + (1 if current else 0) > 1000:
-            if current:
-                report_chunks.append(current)
-            while len(line) > 1000:
-                report_chunks.append(line[:1000])
-                line = line[1000:]
-            current = line
-        else:
-            current = f"{current}\n{line}" if current else line
-    if current:
-        report_chunks.append(current)
-
-    for index, chunk in enumerate(report_chunks):
-        field_name = "Diagnostic Report" if index == 0 else f"Diagnostic Report · {index + 1}"
-        embed.add_field(name=field_name, value=chunk, inline=False)
-
-    embed.set_footer(text="Cirrus Racing Club • Race Control Diagnostics")
-    await interaction.followup.send(embed=embed,ephemeral=True)
-
-
-start_dashboard()
-bot.run(TOKEN)
+bot.run(DISCORD_TOKEN)

@@ -1,16 +1,12 @@
 import os
+from dotenv import load_dotenv
 
+load_dotenv()
 
-BOT_NAME = "Cirrus Racing Club"
-TOKEN_ENV_NAME = "DISCORD_TOKEN"
-
-
-def get_token() -> str:
-    token = os.getenv(TOKEN_ENV_NAME)
-
-    if not token:
-        raise RuntimeError(
-            f"{TOKEN_ENV_NAME} is missing. Add it to your .env file."
-        )
-
-    return token
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
+GUILD_ID = int(os.getenv("GUILD_ID", "0") or 0)
+OWNER_IDS = {
+    int(value.strip())
+    for value in os.getenv("OWNER_IDS", "").split(",")
+    if value.strip().isdigit()
+}
