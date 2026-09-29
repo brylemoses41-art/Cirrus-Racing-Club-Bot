@@ -108,15 +108,17 @@ async def apply_plan(guild: discord.Guild, plan: dict):
             )
             changes.append(f"created category {name}")
 
-        overwrites = {}
+        plan_overwrites = {}
         for role_name, settings in spec.get("permissions", {}).items():
             role = resolve_role(guild, roles_by_name, role_name)
             if role:
-                overwrites[role] = build_overwrite(role, settings)
+                plan_overwrites[role] = build_overwrite(role, settings)
 
-        if overwrites:
+        if plan_overwrites:
+            merged_overwrites = dict(category.overwrites)
+            merged_overwrites.update(plan_overwrites)
             await category.edit(
-                overwrites=overwrites,
+                overwrites=merged_overwrites,
                 reason="Declarative server plan",
             )
             changes.append(f"updated permissions for category {name}")
@@ -152,15 +154,17 @@ async def apply_plan(guild: discord.Guild, plan: dict):
             )
             changes.append(f"moved {name} into {category.name}")
 
-        overwrites = {}
+        plan_overwrites = {}
         for role_name, settings in spec.get("permissions", {}).items():
-            role = roles_by_name.get(role_name)
+            role = resolve_role(guild, roles_by_name, role_name)
             if role:
-                overwrites[role] = build_overwrite(role, settings)
+                plan_overwrites[role] = build_overwrite(role, settings)
 
-        if overwrites:
+        if plan_overwrites:
+            merged_overwrites = dict(channel.overwrites)
+            merged_overwrites.update(plan_overwrites)
             await channel.edit(
-                overwrites=overwrites,
+                overwrites=merged_overwrites,
                 reason="Declarative server plan",
             )
             changes.append(f"updated permissions for channel {name}")
