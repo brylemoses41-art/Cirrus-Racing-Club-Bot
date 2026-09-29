@@ -1,6 +1,223 @@
 {
-  "enabled": false,
+  "enabled": true,
   "roles": [],
-  "categories": [],
-  "channels": []
+  "categories": [
+    {
+      "name": "Community",
+      "permissions": {
+        "@everyone": {
+          "view_channel": true,
+          "send_messages": false,
+          "read_message_history": true
+        }
+      }
+    },
+    {
+      "name": "Economy",
+      "permissions": {
+        "@everyone": {
+          "view_channel": true,
+          "send_messages": false,
+          "read_message_history": true
+        }
+      }
+    },
+    {
+      "name": "Events & Competition",
+      "permissions": {
+        "@everyone": {
+          "view_channel": true,
+          "send_messages": false,
+          "read_message_history": true
+        }
+      }
+    },
+    {
+      "name": "Voice",
+      "permissions": {
+        "@everyone": {
+          "view_channel": true,
+          "send_messages": false,
+          "read_message_history": true
+        }
+      }
+    },
+    {
+      "name": "Roles",
+      "permissions": {
+        "@everyone": {
+          "view_channel": true,
+          "send_messages": false,
+          "read_message_history": true
+        }
+      }
+    },
+    {
+      "name": "Staff",
+      "permissions": {
+        "@everyone": {
+          "view_channel": true,
+          "send_messages": false,
+          "read_message_history": true
+        }
+      }
+    },
+    {
+      "name": "Regulations",
+      "permissions": {
+        "@everyone": {
+          "view_channel": true,
+          "send_messages": false,
+          "read_message_history": true
+        }
+      }
+    },
+    {
+      "name": "Cars",
+      "permissions": {
+        "@everyone": {
+          "view_channel": true,
+          "send_messages": false,
+          "read_message_history": true
+        }
+      }
+    }
+  ],
+  "channels": [
+    {
+      "name": "routes-map-layouts",
+      "category": "Community",
+      "type": "text"
+    },
+    {
+      "name": "racetrack-suggestions",
+      "category": "Community",
+      "type": "text"
+    },
+    {
+      "name": "cpm2-general-chat",
+      "category": "Community",
+      "type": "text"
+    },
+    {
+      "name": "race-meets-updates",
+      "category": "Community",
+      "type": "text"
+    },
+    {
+      "name": "Marketplace",
+      "category": "Community",
+      "type": "text"
+    },
+    {
+      "name": "photos",
+      "category": "Community",
+      "type": "text"
+    },
+    {
+      "name": "Clips-and-highlights",
+      "category": "Community",
+      "type": "text"
+    },
+    {
+      "name": "Polls",
+      "category": "Community",
+      "type": "text"
+    },
+    {
+      "name": "irl-pics",
+      "category": "Community",
+      "type": "text"
+    },
+    {
+      "name": "giveaway",
+      "category": "Community",
+      "type": "text"
+    },
+    {
+      "name": "exotic-car-dex-chat",
+      "category": "Community",
+      "type": "text"
+    },
+    {
+      "name": "commands",
+      "category": "Economy",
+      "type": "text"
+    },
+    {
+      "name": "gt3-fortnight-challenge",
+      "category": "Events & Competition",
+      "type": "text"
+    },
+    {
+      "name": "wall-of-champions",
+      "category": "Events & Competition",
+      "type": "text"
+    },
+    {
+      "name": "Events",
+      "category": "Events & Competition",
+      "type": "text"
+    },
+    {
+      "name": "event-race-application",
+      "category": "Events & Competition",
+      "type": "text"
+    },
+    {
+      "name": "car-meets",
+      "category": "Events & Competition",
+      "type": "text"
+    },
+    {
+      "name": "Lobby",
+      "category": "Voice",
+      "type": "voice"
+    },
+    {
+      "name": "Gaming",
+      "category": "Voice",
+      "type": "voice"
+    },
+    {
+      "name": "role-application",
+      "category": "Roles",
+      "type": "text"
+    },
+    {
+      "name": "application-results",
+      "category": "Roles",
+      "type": "text"
+    },
+    {
+      "name": "staff-promotion",
+      "category": "Staff",
+      "type": "text"
+    },
+    {
+      "name": "Race Rules",
+      "category": "Regulations",
+      "type": "text"
+    },
+    {
+      "name": "class-regulations",
+      "category": "Regulations",
+      "type": "text"
+    },
+    {
+      "name": "race-rules",
+      "category": "Regulations",
+      "type": "text"
+    },
+    {
+      "name": "tunes",
+      "category": "Cars",
+      "type": "text"
+    },
+    {
+      "name": "car-photos",
+      "category": "Cars",
+      "type": "text"
+    }
+  ]
 }
