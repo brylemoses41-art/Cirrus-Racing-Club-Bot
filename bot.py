@@ -60,6 +60,12 @@ def build_overwrite(role, settings):
     return overwrite
 
 
+def resolve_role(guild, roles_by_name, role_name):
+    if role_name in ("@everyone", guild.default_role.name):
+        return guild.default_role
+    return roles_by_name.get(role_name)
+
+
 async def apply_plan(guild: discord.Guild, plan: dict):
     changes = []
     roles_by_name = {role.name: role for role in guild.roles}
@@ -104,7 +110,7 @@ async def apply_plan(guild: discord.Guild, plan: dict):
 
         overwrites = {}
         for role_name, settings in spec.get("permissions", {}).items():
-            role = roles_by_name.get(role_name)
+            role = resolve_role(guild, roles_by_name, role_name)
             if role:
                 overwrites[role] = build_overwrite(role, settings)
 
